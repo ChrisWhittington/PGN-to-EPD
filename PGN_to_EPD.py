@@ -390,6 +390,8 @@ async def make_epds():
             for i in range(int(len(game_epd_list) / 5)):            
                 r = random.randint(FIRSTMOVENUM, len(game_epd_list) - 1)
                 epd = game_epd_list[r]
+                # add game length
+                epd += (" len=" + str(halfmovenum))
                 #while (r < len(game_epd_list)):                    
                 #    # move on from non-quiet positions (move is capture or promo)
                 #    x = epd.split(';')
@@ -448,9 +450,10 @@ async def make_epds():
         save_epd_batch(saved_epd_list, epd_batch_id, epd_save_filename)
     #assert(1==2), 'break'
     await engine.quit()
+    # dumb, when parsllel, don't do process here
     # concatenate all epds, shuffle and split into N sub-files
     # ========================================================
-    process_epds()
+    # process_epds()
     return
 #
 
@@ -458,19 +461,32 @@ async def make_epds():
 # currently adds SF11 analysis, junking any capture/promos
 async def analyse_epds(core_id, total_cores):
     # load analysis engine
-    print("trying to open " + ANALYSIS_ENGINE + ".exe")
-    try:
-        transport, engine = await chess.engine.popen_uci(ANALYSIS_ENGINE)
-    except OSError:
-        print("engine open fail, " + ANALYSIS_ENGINE + ".exe should be in working directory")
+    if ((ANALYSIS_ENGINE == "sf11") or (ANALYSIS_ENGINE == "lc0")):
+        print("trying to open " + ANALYSIS_ENGINE + ".exe")
+        if (ANALYSIS_ENGINE == "sf11"):
+            try:
+                transport, engine = await chess.engine.popen_uci(ANALYSIS_ENGINE)
+            except OSError:
+                print("engine open fail, " + ANALYSIS_ENGINE + ".exe should be in working directory")
+                assert(1==2), 'break'
+        else:
+            try:
+                transport, engine = await chess.engine.popen_uci("lc0-v0.25.1/" + ANALYSIS_ENGINE)
+            except OSError:
+                print("engine open fail, lc0-v0.25.1/" + ANALYSIS_ENGINE + ".exe should be in working directory")
+                assert(1==2), 'break'
+
+        engine_name = engine.id.get("name")
+        print("Found", engine_name)
+        # print(engine.options['Threads'])
+        # await engine.configure({'Threads': THREADS})
+        #assert(1==2), 'break'
+        loadpath = "temp-eval-epds/temp-eval-results-"
+        savepath = "result-plus-sf-eval-epds/sf-eval"
+    else:
+        print("unknown engine")
         assert(1==2), 'break'
-    engine_name = engine.id.get("name")
-    print("Found", engine_name)
-    # print(engine.options['Threads'])
-    # await engine.configure({'Threads': THREADS})
-    #assert(1==2), 'break'
-    loadpath = "temp-eval-epds/temp-eval-results-"
-    savepath = "result-plus-sf-eval-epds/sf-eval"
+
     # we should have 80 files, we're using total-cores(10) and this core is core_id
     n_batches = int(80 / total_cores)
     start_batch = (core_id-1) * n_batches
@@ -503,7 +519,12 @@ async def analyse_epds(core_id, total_cores):
             score = info['score']
             # convert score to integer
             # ========================
-            v_sf = normalise_uci_score_to_int(score)
+            if (ANALYSIS_ENGINE == "sf11"):
+                v_sf = normalise_uci_score_to_int(score)
+            else:
+                # not actually sure how lc0 reports scores
+                # ????????????????????????????????????????
+                v_sf = score;
 
             pv = info['pv']
             move = pv[0]
@@ -530,7 +551,7 @@ def main(argv):
     global ELO_LIMIT, SHORTDRAWLENGTH, SHORTGAMELENGTH, FIRSTMOVENUM
     global GAME_OUTCOME_TIME_LIMIT, POSITION_ANALYSIS_TIME_LIMIT
     global THREADS, WIN_LIMIT, DRAW_LIMIT, ANALYSIS_ENGINE, STUB_FILENAME
-    global PGN_BATCH_START, PGN_BATCH_END, CORE_ID, USEABLE_CORES
+    global PGN_BATCH_START, PGN_BATCH_END, CORE_ID, USEABLE_CORES, ANALYSIS_ENGINE
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--elo', dest='elo', required=False, type=int, default=ELO_LIMIT, help='minimum player Elo')
@@ -548,6 +569,7 @@ def main(argv):
 
     parser.add_argument('--stubfilename', dest='stubfilename', required=False, default=STUB_FILENAME, help='stub of epd/pgn data file names')
     parser.add_argument('--action', dest='action', required=False, default="null", help='operation: make/process/analyse')
+    parser.add_argument('--analysisengine', dest='analysisengine', required=False, default="sf11", help='either lc0 or sf11')
 
     args = parser.parse_args()
 
@@ -562,6 +584,7 @@ def main(argv):
     PGN_BATCH_START = args.pgnstart
     PGN_BATCH_END = args.pgnend
     STUB_FILENAME = args.stubfilename
+    ANALYSIS_ENGINE = args.analysisengine
 
     action = args.action
     core_id = args.coreid
@@ -609,8 +632,8 @@ def main(argv):
     if (1==2):
         clean_raw_pgns()
     #
-    # done as part of make_epds()
-    # no need to repeat, except first time round when I forgot it
+    # after producing epds from pgns, concatenate
+    # shuffle and save
     if (action == "process"):
         process_epds()
     #
